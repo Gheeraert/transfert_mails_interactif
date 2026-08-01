@@ -7,7 +7,7 @@ Un script Python qui transfère automatiquement les e-mails récents d'une boît
 ## ✨ Fonctionnalités
 
 - Connexion sécurisée à une boîte IMAP (université, institution…) et transfert vers n'importe quelle adresse SMTP (Gmail, Outlook, Zimbra…).
-- Recherche des messages **non lus depuis 7 jours** (`UNSEEN SINCE`).
+- Recherche des messages **non lus depuis N jours** (`UNSEEN SINCE`) — 7 jours par défaut, réglable dans la boîte de dialogue ou le fichier de config.
 - Transfert fidèle du contenu : texte, HTML, pièces jointes, et un cartouche récapitulatif indiquant l'expéditeur/destinataires/date d'origine.
 - **Un message n'est jamais marqué comme lu sur le serveur IMAP avant que son transfert vers l'adresse de destination soit confirmé.** Le script utilise `BODY.PEEK[]` (qui ne touche pas au flag `\Seen`) pour récupérer le message, et ne pose `\Seen` qu'après un envoi SMTP réussi. En cas d'erreur, le message reste non lu et sera retenté au cycle suivant.
 - Une erreur sur un message isolé (pièce jointe corrompue, encodage inattendu…) n'interrompt pas le traitement des autres messages du lot ni le script entier.
@@ -42,7 +42,8 @@ Au premier lancement (ou si des identifiants sont manquants), une fenêtre s'ouv
 - le serveur et l'identifiant IMAP (boîte source),
 - le mot de passe IMAP,
 - l'adresse Gmail (ou autre) de destination,
-- le mot de passe (ou mot de passe d'application) SMTP.
+- le mot de passe (ou mot de passe d'application) SMTP,
+- la limite de recherche en jours (`jours_limite`, entier positif, 7 par défaut) : seuls les mails non lus reçus depuis ce nombre de jours sont transférés.
 
 Ces informations sont ensuite enregistrées dans `mail_config.json`, créé à côté du script, et rechargées automatiquement aux lancements suivants sans repasser par la fenêtre.
 
@@ -54,7 +55,7 @@ Pour resaisir des identifiants (changement de mot de passe, erreur de saisie…)
 
 ## ▶️ Fonctionnement
 
-Le script tourne en boucle infinie : à chaque cycle, il récupère les messages non lus des 7 derniers jours, les transfère un par un, puis attend 5 minutes avant de recommencer. Pour l'arrêter, fermez le terminal ou interrompez le processus (Ctrl+C).
+Le script tourne en boucle infinie : à chaque cycle, il récupère les messages non lus des `jours_limite` derniers jours (7 par défaut), les transfère un par un, puis attend 5 minutes avant de recommencer. Pour l'arrêter, fermez le terminal ou interrompez le processus (Ctrl+C).
 
 Pour une exécution ponctuelle plutôt qu'une boucle continue, retirez le `while True:` et son `time.sleep(300)` final, ou adaptez le script à votre planificateur de tâches (cron, Planificateur de tâches Windows…).
 

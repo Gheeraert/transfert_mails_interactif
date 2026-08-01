@@ -30,6 +30,7 @@ CHAMPS_CONFIG = [
     ("imap_pass", "Mot de passe IMAP", "", True),
     ("gmail_user", "Adresse Gmail (expéditeur)", "blaisepascaldeportroyal@gmail.com", False),
     ("gmail_pass", "Mot de passe application Gmail", "", True),
+    ("jours_limite", "Rechercher les mails non lus des N derniers jours", "7", False),
 ]
 
 
@@ -77,6 +78,13 @@ def demander_identifiants(config_existant):
             messagebox.showerror("Champs manquants", "Veuillez renseigner : " + ", ".join(manquants))
             resultat.clear()
             return
+        if not resultat["jours_limite"].isdigit() or int(resultat["jours_limite"]) < 1:
+            messagebox.showerror(
+                "Valeur invalide",
+                "« Rechercher les mails non lus des N derniers jours » doit être un nombre entier positif."
+            )
+            resultat.clear()
+            return
         root.destroy()
 
     def annuler():
@@ -122,6 +130,16 @@ SMTP_HOST = 'smtp.gmail.com'
 SMTP_PORT = 587
 GMAIL_USER = _config['gmail_user']
 GMAIL_PASS = _config['gmail_pass']
+
+try:
+    JOURS_LIMITE = int(_config['jours_limite'])
+    if JOURS_LIMITE < 1:
+        raise ValueError
+except (KeyError, ValueError):
+    sys.exit(
+        "Valeur invalide pour 'jours_limite' dans mail_config.json (entier positif attendu). "
+        "Supprimez le fichier ou corrigez cette valeur, puis relancez le script."
+    )
 
 
 
@@ -195,7 +213,7 @@ while True:
         imap.select('INBOX')
 
 
-        date_limite = (datetime.now() - timedelta(days=7)).strftime("%d-%b-%Y")
+        date_limite = (datetime.now() - timedelta(days=JOURS_LIMITE)).strftime("%d-%b-%Y")
         search_criteria = f'(UNSEEN SINCE {date_limite})'
         status, messages = imap.search(None, search_criteria)
         transferred = []
