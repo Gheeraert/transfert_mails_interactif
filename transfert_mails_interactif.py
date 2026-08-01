@@ -113,6 +113,13 @@ def demander_identifiants(config_existant):
         Retourne le dict de valeurs si tout est valide, None sinon (avec un
         message d'erreur déjà affiché)."""
         valeurs = {cle: var.get().strip() for cle, var in entrees.items()}
+        # Les mots de passe d'application Gmail sont affichés par Google
+        # groupés par blocs de 4 (ex. "wkyz wqog crpf qtgu") mais ces espaces
+        # ne font pas partie du mot de passe réel : on les retire pour éviter
+        # un échec d'authentification silencieux si l'utilisateur les colle
+        # tels quels.
+        if "gmail_pass" in valeurs:
+            valeurs["gmail_pass"] = valeurs["gmail_pass"].replace(" ", "")
         manquants = [libelle for cle, libelle, _, _ in CHAMPS_CONFIG if not valeurs.get(cle)]
         if manquants:
             messagebox.showerror("Champs manquants", "Veuillez renseigner : " + ", ".join(manquants))
@@ -295,7 +302,10 @@ def construire_corps(body_text, body_html, recipients_text, recipients_html):
 while True:
     try:
         imap = imaplib.IMAP4_SSL(IMAP_HOST)
-        imap.login(IMAP_USER, IMAP_PASS)
+        try:
+            imap.login(IMAP_USER, IMAP_PASS)
+        except imaplib.IMAP4.error as e:
+            raise imaplib.IMAP4.error(f"[IMAP univ-rouen] {e}") from e
         imap.select('INBOX')
 
 
@@ -432,20 +442,26 @@ while True:
                 if msg.get_content_maintype() != 'multipart':
                     msg.make_mixed()
 
-                # Attacher le contenu (texte/HTML) dans le message final
-                if contenu.is_multipart():
-                    for part in contenu.iter_parts():
-                        msg.attach(part)
-                else:
-                    # cas texte seul : on attache une part text/plain
-                    txt_part = EmailMessage()
-                    txt_part.set_content(contenu.get_content())
-                    msg.attach(txt_part)
+                # Attacher le contenu dans le message final. `contenu` est
+                # attaché tel quel, comme UNE SEULE sous-partie imbriquée :
+                # quand il s'agit d'un multipart/alternative (texte + HTML),
+                # cela préserve la relation "alternative" (le client mail
+                # n'affiche qu'une seule des deux versions). Décomposer et
+                # rattacher les sous-parties individuellement les transforme
+                # en pièces indépendantes affichées l'une après l'autre —
+                # d'où le texte brut suivi du HTML en double.
+                msg.attach(contenu)
 
                 print(f"✉ Envoi du mail : {msg['Subject']}")
                 with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
                     server.starttls(context=ssl.create_default_context())
-                    server.login(GMAIL_USER, GMAIL_PASS)
+                    try:
+                        server.login(GMAIL_USER, GMAIL_PASS)
+                    except smtplib.SMTPAuthenticationError as e:
+                        raise smtplib.SMTPAuthenticationError(
+                            e.smtp_code,
+                            f"[Gmail SMTP] {e.smtp_error}"
+                        ) from e
                     server.send_message(msg)
 
                 print("✅ Transfert réussi")
@@ -456,6 +472,13 @@ while True:
                 # prochain cycle.
                 imap.store(num, '+FLAGS', '\\Seen')
                 transferred.append(msg['Subject'])
+
+            except (imaplib.IMAP4.error, smtplib.SMTPAuthenticationError):
+                # Erreur d'authentification (IMAP ou Gmail) : contrairement aux
+                # autres erreurs, on ne doit PAS l'avaler ni passer au message
+                # suivant — tous les envois échoueraient pareil. On la relaie
+                # vers le bloc extérieur, qui rouvre la boîte de dialogue.
+                raise
 
             except Exception as e:
                 # Une erreur sur CE message ne doit pas interrompre le
@@ -471,6 +494,35 @@ while True:
         print(f"⏳ Pause de 5 minutes... ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n")
         time.sleep(300)
 
+
+    except (imaplib.IMAP4.error, smtplib.SMTPAuthenticationError) as e:
+        # Identifiants IMAP ou Gmail invalides/expirés : on rouvre la boîte
+        # de dialogue (pré-remplie) pour les corriger, au lieu de planter.
+        print(f"🔒 Erreur d'authentification : {e}")
+        print("Réouverture de la boîte de dialogue des identifiants...")
+
+        nouvelle_config = demander_identifiants(_config)
+        if not nouvelle_config:
+            sys.exit("Saisie des identifiants annulée — arrêt du script.")
+
+        _config = nouvelle_config
+        sauvegarder_config(_config)
+
+        IMAP_HOST = _config['imap_host']
+        IMAP_USER = _config['imap_user']
+        IMAP_PASS = _config['imap_pass']
+        GMAIL_USER = _config['gmail_user']
+        GMAIL_PASS = _config['gmail_pass']
+        try:
+            JOURS_LIMITE = int(_config['jours_limite'])
+            if JOURS_LIMITE < 1:
+                raise ValueError
+        except (KeyError, ValueError):
+            sys.exit(
+                "Valeur invalide pour 'jours_limite' dans la configuration "
+                "(entier positif attendu)."
+            )
+        continue
 
     except Exception as e:
         print(f"💥 Erreur : {e}")
