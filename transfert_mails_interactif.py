@@ -1,7 +1,6 @@
 import imaplib
 import email
 import json
-import os
 import smtplib
 import sys
 import time
@@ -11,6 +10,7 @@ from pathlib import Path
 from email.message import EmailMessage
 from email.utils import make_msgid, formatdate, getaddresses
 from email.header import decode_header, make_header
+from email.errors import HeaderParseError
 import ssl
 from datetime import datetime, timedelta
 import re
@@ -60,14 +60,14 @@ def memoriser_chemin_config(chemin: Path):
         pass
 
 
-CONFIG_FILE = chemin_config_actif()
+config_file = chemin_config_actif()
 
 
 def charger_config():
     """Lit le fichier JSON courant s'il existe ; retourne {} sinon ou si corrompu."""
-    if CONFIG_FILE.exists():
+    if config_file.exists():
         try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError):
             return {}
@@ -75,7 +75,7 @@ def charger_config():
 
 
 def sauvegarder_config(config):
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    with open(config_file, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
 
 
@@ -103,7 +103,7 @@ def demander_identifiants(config_existant):
         entrees[cle] = var
 
     ligne_fichier = len(CHAMPS_CONFIG)
-    chemin_var = tk.StringVar(value=f"Fichier : {CONFIG_FILE}")
+    chemin_var = tk.StringVar(value=f"Fichier : {config_file}")
     tk.Label(root, textvariable=chemin_var, fg="gray40", anchor="w").grid(
         row=ligne_fichier, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 0)
     )
@@ -126,7 +126,7 @@ def demander_identifiants(config_existant):
         return valeurs
 
     def charger_depuis_fichier():
-        global CONFIG_FILE
+        global config_file
         chemin = filedialog.askopenfilename(
             title="Charger un fichier de configuration",
             filetypes=[("Fichiers JSON", "*.json"), ("Tous les fichiers", "*.*")],
@@ -142,12 +142,12 @@ def demander_identifiants(config_existant):
         for cle, var in entrees.items():
             if cle in data:
                 var.set(str(data[cle]))
-        CONFIG_FILE = Path(chemin)
-        memoriser_chemin_config(CONFIG_FILE)
-        chemin_var.set(f"Fichier : {CONFIG_FILE}")
+        config_file = Path(chemin)
+        memoriser_chemin_config(config_file)
+        chemin_var.set(f"Fichier : {config_file}")
 
     def enregistrer_sous():
-        global CONFIG_FILE
+        global config_file
         valeurs = valeurs_valides()
         if valeurs is None:
             return
@@ -159,8 +159,8 @@ def demander_identifiants(config_existant):
         )
         if not chemin:
             return
-        CONFIG_FILE = Path(chemin)
-        memoriser_chemin_config(CONFIG_FILE)
+        config_file = Path(chemin)
+        memoriser_chemin_config(config_file)
         resultat.update(valeurs)
         root.destroy()
 
@@ -243,7 +243,7 @@ def decode_mime_words(value: str) -> str:
         return ''
     try:
         return str(make_header(decode_header(value))).strip()
-    except Exception:
+    except (LookupError, UnicodeError, ValueError, IndexError, HeaderParseError):
         return value.strip()
 
 
@@ -313,6 +313,8 @@ while True:
                 # serveur. Le flag \Seen n'est posé, explicitement, qu'après
                 # confirmation de l'envoi réussi vers Gmail — jamais avant.
                 status, data = imap.fetch(num, '(BODY.PEEK[])')
+                if status != 'OK' or not data or data[0] is None:
+                    raise RuntimeError(f"Échec de la récupération IMAP (status={status})")
                 raw_email = data[0][1]
                 original = email.message_from_bytes(raw_email)
 
@@ -372,13 +374,13 @@ while True:
                             charset = part.get_content_charset() or 'utf-8'
                             try:
                                 body_html = payload.decode(charset, errors='ignore')
-                            except Exception as e:
+                            except LookupError as e:
                                 print("Erreur HTML multipart :", e)
                         elif content_type == "text/plain" and body_text is None:
                             charset = part.get_content_charset() or 'utf-8'
                             try:
                                 body_text = payload.decode(charset, errors='ignore')
-                            except Exception as e:
+                            except LookupError as e:
                                 print("Erreur texte multipart :", e)
                 else:
                     payload = original.get_payload(decode=True)
@@ -394,7 +396,7 @@ while True:
                         print("Type :", content_type)
                         print("Charset :", charset)
                         print("Contenu (début) :", decoded[:200], "...")
-                    except Exception as e:
+                    except LookupError as e:
                         print("Erreur non multipart :", e)
 
                 corps_absent = not body_text and not body_html
