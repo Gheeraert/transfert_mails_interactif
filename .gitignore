@@ -4,6 +4,7 @@ __pycache__/
 .idea/
 .env
 mail_config.json
+config_path.txt
 
 # Projets sans rapport partageant ce dossier de travail local
 test.py

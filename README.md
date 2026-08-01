@@ -45,11 +45,18 @@ Au premier lancement (ou si des identifiants sont manquants), une fenêtre s'ouv
 - le mot de passe (ou mot de passe d'application) SMTP,
 - la limite de recherche en jours (`jours_limite`, entier positif, 7 par défaut) : seuls les mails non lus reçus depuis ce nombre de jours sont transférés.
 
-Ces informations sont ensuite enregistrées dans `mail_config.json`, créé à côté du script, et rechargées automatiquement aux lancements suivants sans repasser par la fenêtre.
+Ces informations sont ensuite enregistrées dans `mail_config.json`, créé par défaut à côté du script, et rechargées automatiquement aux lancements suivants sans repasser par la fenêtre.
 
-> ⚠️ **`mail_config.json` contient vos mots de passe en clair sur le disque.** Ce fichier est exclu du dépôt via `.gitignore` — ne le committez jamais. Protégez l'accès à la machine sur laquelle il tourne. Pour Gmail, utilisez impérativement un [mot de passe d'application](https://support.google.com/accounts/answer/185833) plutôt que le mot de passe principal du compte.
+La boîte de dialogue propose aussi deux boutons pour choisir librement l'emplacement du fichier de config :
 
-Pour resaisir des identifiants (changement de mot de passe, erreur de saisie…), supprimez simplement `mail_config.json` et relancez le script.
+- **Charger...** : importer un fichier `mail_config.json` existant, où qu'il se trouve (ex. sur une clé USB, un dossier synchronisé), et pré-remplir les champs avec son contenu.
+- **Enregistrer sous...** : choisir un autre emplacement que celui par défaut pour sauvegarder la configuration.
+
+Dans les deux cas, l'emplacement choisi est mémorisé dans `config_path.txt` (à côté du script) : les lancements suivants utiliseront directement ce fichier, sans repasser par la boîte de dialogue.
+
+> ⚠️ **Le fichier de config contient vos mots de passe en clair sur le disque, quel que soit son emplacement.** `mail_config.json` et `config_path.txt` sont exclus du dépôt via `.gitignore` — ne les committez jamais. Protégez l'accès à la machine (et, le cas échéant, au support externe) sur laquelle il se trouve. Pour Gmail, utilisez impérativement un [mot de passe d'application](https://support.google.com/accounts/answer/185833) plutôt que le mot de passe principal du compte.
+
+Pour resaisir des identifiants (changement de mot de passe, erreur de saisie…), supprimez le fichier de config actif (et `config_path.txt` s'il pointe ailleurs que l'emplacement par défaut) puis relancez le script.
 
 ---
 

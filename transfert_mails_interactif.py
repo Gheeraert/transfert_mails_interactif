@@ -6,7 +6,7 @@ import smtplib
 import sys
 import time
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 from pathlib import Path
 from email.message import EmailMessage
 from email.utils import make_msgid, formatdate, getaddresses
@@ -21,7 +21,11 @@ import html
 
 # === CONFIGURATION (identifiants saisis via une boîte de dialogue, puis
 #     mis en cache dans un fichier JSON local — jamais dans le code source) ===
-CONFIG_FILE = Path(__file__).resolve().parent / "mail_config.json"
+# Emplacement par défaut du fichier de config, et petit fichier-pointeur (à
+# côté du script) qui mémorise l'emplacement choisi par l'utilisateur via les
+# boutons "Charger..." / "Enregistrer sous..." de la boîte de dialogue.
+CONFIG_FILE_DEFAUT = Path(__file__).resolve().parent / "mail_config.json"
+POINTEUR_FILE = Path(__file__).resolve().parent / "config_path.txt"
 
 # (clé JSON, libellé affiché, valeur par défaut proposée, champ secret ?)
 CHAMPS_CONFIG = [
@@ -34,8 +38,33 @@ CHAMPS_CONFIG = [
 ]
 
 
+def chemin_config_actif():
+    """Retourne le fichier de config à utiliser : celui mémorisé par
+    POINTEUR_FILE s'il existe, sinon l'emplacement par défaut."""
+    if POINTEUR_FILE.exists():
+        try:
+            chemin = POINTEUR_FILE.read_text(encoding="utf-8").strip()
+            if chemin:
+                return Path(chemin)
+        except OSError:
+            pass
+    return CONFIG_FILE_DEFAUT
+
+
+def memoriser_chemin_config(chemin: Path):
+    """Enregistre l'emplacement choisi pour que les prochains lancements
+    utilisent directement le même fichier, sans repasser par la boîte."""
+    try:
+        POINTEUR_FILE.write_text(str(chemin), encoding="utf-8")
+    except OSError:
+        pass
+
+
+CONFIG_FILE = chemin_config_actif()
+
+
 def charger_config():
-    """Lit le fichier JSON local s'il existe ; retourne {} sinon ou si corrompu."""
+    """Lit le fichier JSON courant s'il existe ; retourne {} sinon ou si corrompu."""
     if CONFIG_FILE.exists():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -54,7 +83,10 @@ def demander_identifiants(config_existant):
     """Affiche une fenêtre tkinter pour saisir/compléter les identifiants manquants.
 
     Pré-remplit les champs déjà connus (config_existant) ; les mots de passe
-    sont masqués à l'écran. Ferme et retourne {} si l'utilisateur annule.
+    sont masqués à l'écran. Deux boutons permettent de choisir librement
+    l'emplacement du fichier de config : "Charger..." (importer un fichier
+    existant, où qu'il soit) et "Enregistrer sous..." (choisir où sauvegarder).
+    Ferme et retourne {} si l'utilisateur annule.
     """
     resultat = {}
 
@@ -70,21 +102,73 @@ def demander_identifiants(config_existant):
         entree.grid(row=i, column=1, padx=8, pady=6)
         entrees[cle] = var
 
-    def valider():
-        for cle, var in entrees.items():
-            resultat[cle] = var.get().strip()
-        manquants = [libelle for cle, libelle, _, _ in CHAMPS_CONFIG if not resultat.get(cle)]
+    ligne_fichier = len(CHAMPS_CONFIG)
+    chemin_var = tk.StringVar(value=f"Fichier : {CONFIG_FILE}")
+    tk.Label(root, textvariable=chemin_var, fg="gray40", anchor="w").grid(
+        row=ligne_fichier, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 0)
+    )
+
+    def valeurs_valides():
+        """Relit les champs, vérifie qu'ils sont complets et cohérents.
+        Retourne le dict de valeurs si tout est valide, None sinon (avec un
+        message d'erreur déjà affiché)."""
+        valeurs = {cle: var.get().strip() for cle, var in entrees.items()}
+        manquants = [libelle for cle, libelle, _, _ in CHAMPS_CONFIG if not valeurs.get(cle)]
         if manquants:
             messagebox.showerror("Champs manquants", "Veuillez renseigner : " + ", ".join(manquants))
-            resultat.clear()
-            return
-        if not resultat["jours_limite"].isdigit() or int(resultat["jours_limite"]) < 1:
+            return None
+        if not valeurs["jours_limite"].isdigit() or int(valeurs["jours_limite"]) < 1:
             messagebox.showerror(
                 "Valeur invalide",
                 "« Rechercher les mails non lus des N derniers jours » doit être un nombre entier positif."
             )
-            resultat.clear()
+            return None
+        return valeurs
+
+    def charger_depuis_fichier():
+        global CONFIG_FILE
+        chemin = filedialog.askopenfilename(
+            title="Charger un fichier de configuration",
+            filetypes=[("Fichiers JSON", "*.json"), ("Tous les fichiers", "*.*")],
+        )
+        if not chemin:
             return
+        try:
+            with open(chemin, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            messagebox.showerror("Erreur de lecture", f"Impossible de lire ce fichier :\n{e}")
+            return
+        for cle, var in entrees.items():
+            if cle in data:
+                var.set(str(data[cle]))
+        CONFIG_FILE = Path(chemin)
+        memoriser_chemin_config(CONFIG_FILE)
+        chemin_var.set(f"Fichier : {CONFIG_FILE}")
+
+    def enregistrer_sous():
+        global CONFIG_FILE
+        valeurs = valeurs_valides()
+        if valeurs is None:
+            return
+        chemin = filedialog.asksaveasfilename(
+            title="Enregistrer la configuration sous...",
+            defaultextension=".json",
+            filetypes=[("Fichiers JSON", "*.json"), ("Tous les fichiers", "*.*")],
+            initialfile="mail_config.json",
+        )
+        if not chemin:
+            return
+        CONFIG_FILE = Path(chemin)
+        memoriser_chemin_config(CONFIG_FILE)
+        resultat.update(valeurs)
+        root.destroy()
+
+    def valider():
+        valeurs = valeurs_valides()
+        if valeurs is None:
+            return
+        resultat.update(valeurs)
         root.destroy()
 
     def annuler():
@@ -92,8 +176,10 @@ def demander_identifiants(config_existant):
         root.destroy()
 
     boutons = tk.Frame(root)
-    boutons.grid(row=len(CHAMPS_CONFIG), column=0, columnspan=2, pady=10)
+    boutons.grid(row=ligne_fichier + 1, column=0, columnspan=2, pady=10)
+    tk.Button(boutons, text="Charger...", command=charger_depuis_fichier).pack(side="left", padx=6)
     tk.Button(boutons, text="Enregistrer", command=valider).pack(side="left", padx=6)
+    tk.Button(boutons, text="Enregistrer sous...", command=enregistrer_sous).pack(side="left", padx=6)
     tk.Button(boutons, text="Annuler", command=annuler).pack(side="left", padx=6)
 
     root.protocol("WM_DELETE_WINDOW", annuler)
@@ -103,7 +189,7 @@ def demander_identifiants(config_existant):
 
 
 def obtenir_config():
-    """Charge la config JSON locale ; si des identifiants manquent, ouvre la
+    """Charge la config JSON courante ; si des identifiants manquent, ouvre la
     boîte de dialogue tkinter, sauvegarde le résultat, et le retourne."""
     config = charger_config()
     requis = [cle for cle, _, _, _ in CHAMPS_CONFIG]
