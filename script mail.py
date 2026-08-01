@@ -1,9 +1,13 @@
 import imaplib
 import email
+import json
 import os
 import smtplib
 import sys
 import time
+import tkinter as tk
+from tkinter import messagebox
+from pathlib import Path
 from email.message import EmailMessage
 from email.utils import make_msgid, formatdate, getaddresses
 from email.header import decode_header, make_header
@@ -15,22 +19,109 @@ import html
 
 
 
+# === CONFIGURATION (identifiants saisis via une boîte de dialogue, puis
+#     mis en cache dans un fichier JSON local — jamais dans le code source) ===
+CONFIG_FILE = Path(__file__).resolve().parent / "mail_config.json"
+
+# (clé JSON, libellé affiché, valeur par défaut proposée, champ secret ?)
+CHAMPS_CONFIG = [
+    ("imap_host", "Serveur IMAP", "imap.univ-rouen.fr", False),
+    ("imap_user", "Identifiant IMAP", "gheerton@univ-rouen.fr", False),
+    ("imap_pass", "Mot de passe IMAP", "", True),
+    ("gmail_user", "Adresse Gmail (expéditeur)", "blaisepascaldeportroyal@gmail.com", False),
+    ("gmail_pass", "Mot de passe application Gmail", "", True),
+]
+
+
+def charger_config():
+    """Lit le fichier JSON local s'il existe ; retourne {} sinon ou si corrompu."""
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return {}
+
+
+def sauvegarder_config(config):
+    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+
+def demander_identifiants(config_existant):
+    """Affiche une fenêtre tkinter pour saisir/compléter les identifiants manquants.
+
+    Pré-remplit les champs déjà connus (config_existant) ; les mots de passe
+    sont masqués à l'écran. Ferme et retourne {} si l'utilisateur annule.
+    """
+    resultat = {}
+
+    root = tk.Tk()
+    root.title("Identifiants — transfert de mails")
+    root.resizable(False, False)
+
+    entrees = {}
+    for i, (cle, libelle, defaut, est_secret) in enumerate(CHAMPS_CONFIG):
+        tk.Label(root, text=libelle).grid(row=i, column=0, sticky="w", padx=8, pady=6)
+        var = tk.StringVar(value=config_existant.get(cle, defaut))
+        entree = tk.Entry(root, textvariable=var, width=42, show="•" if est_secret else "")
+        entree.grid(row=i, column=1, padx=8, pady=6)
+        entrees[cle] = var
+
+    def valider():
+        for cle, var in entrees.items():
+            resultat[cle] = var.get().strip()
+        manquants = [libelle for cle, libelle, _, _ in CHAMPS_CONFIG if not resultat.get(cle)]
+        if manquants:
+            messagebox.showerror("Champs manquants", "Veuillez renseigner : " + ", ".join(manquants))
+            resultat.clear()
+            return
+        root.destroy()
+
+    def annuler():
+        resultat.clear()
+        root.destroy()
+
+    boutons = tk.Frame(root)
+    boutons.grid(row=len(CHAMPS_CONFIG), column=0, columnspan=2, pady=10)
+    tk.Button(boutons, text="Enregistrer", command=valider).pack(side="left", padx=6)
+    tk.Button(boutons, text="Annuler", command=annuler).pack(side="left", padx=6)
+
+    root.protocol("WM_DELETE_WINDOW", annuler)
+    root.mainloop()
+
+    return resultat
+
+
+def obtenir_config():
+    """Charge la config JSON locale ; si des identifiants manquent, ouvre la
+    boîte de dialogue tkinter, sauvegarde le résultat, et le retourne."""
+    config = charger_config()
+    requis = [cle for cle, _, _, _ in CHAMPS_CONFIG]
+    if all(config.get(cle) for cle in requis):
+        return config
+
+    config = demander_identifiants(config)
+    if not config:
+        sys.exit("Saisie des identifiants annulée — arrêt du script.")
+
+    sauvegarder_config(config)
+    return config
+
+
+_config = obtenir_config()
+
 # === PARAMÈTRES PERSONNALISABLES ===
-IMAP_HOST = 'imap.univ-rouen.fr'
-IMAP_USER = 'gheerton@univ-rouen.fr'
-IMAP_PASS = os.environ.get('UNIV_ROUEN_IMAP_PASS')
+IMAP_HOST = _config['imap_host']
+IMAP_USER = _config['imap_user']
+IMAP_PASS = _config['imap_pass']
 
 
 SMTP_HOST = 'smtp.gmail.com'
 SMTP_PORT = 587
-GMAIL_USER = 'blaisepascaldeportroyal@gmail.com'
-GMAIL_PASS = os.environ.get('GMAIL_SMTP_PASS')
-
-if not IMAP_PASS or not GMAIL_PASS:
-    sys.exit(
-        "Variables d'environnement manquantes : "
-        "définissez UNIV_ROUEN_IMAP_PASS et GMAIL_SMTP_PASS avant de lancer le script."
-    )
+GMAIL_USER = _config['gmail_user']
+GMAIL_PASS = _config['gmail_pass']
 
 
 
